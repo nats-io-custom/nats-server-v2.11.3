@@ -1,0 +1,179 @@
+name: CI
+
+on:
+  push:
+    paths-ignore:
+      - "**.md"
+
+env:
+  IMAGE_NAME: ghstahl/nats
+  BASE_VERSION: "2000.11.0"
+  buf_version: "latest"
+  go_version: "1.24"
+
+jobs:
+  # Create and post docker image, bump
+  build-docker-push-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # This grants write permission for repository contents, including tags
+
+    strategy:
+      matrix:
+        platform: [amd64, arm64]
+        include:
+          - platform: amd64
+            runner_platform: amd64
+            nats_server_version: 2.11.3
+          - platform: arm64
+            runner_platform: amd64
+            nats_server_version: 2.11.3
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Establish Versioning, Tags, and Labels
+        id: vtl
+        uses: mapped/action-vtl@latest
+        with:
+          baseVersion: ${{ env.BASE_VERSION }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          dockerImage: ${{ env.IMAGE_NAME }}
+          dockerPlatformSuffix: ${{ matrix.platform }}
+
+      - name: nats-server Dependency - Buf
+        uses: bufbuild/buf-setup-action@v1.50.0
+        with:
+          github_token: ${{ github.token }}
+          version: ${{ env.buf_version }}
+
+      - name: nats-server Dependency - Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.go_version }}
+
+      - name: nats-server overlay build
+        run: |
+          # Check if the overlay directory exists and is not empty
+          if [ -d "$OVERLAY_FOLDER" ] && [ "$(ls -A $OVERLAY_FOLDER)" ]; then
+              echo "Overlay directory exists and is not empty. Proceeding with operations."
+
+              # Clone the nats-server git repository
+              if git clone https://github.com/nats-io/nats-server.git "$CLONE_FOLDER"; then
+                  echo "Successfully cloned nats-server repository."
+
+                  # Navigate to the cloned directory
+                  cd "$CLONE_FOLDER" || exit
+
+                  # Checkout the specific tag
+                  if git checkout tags/v${{ matrix.nats_server_version }}; then
+                      echo "Checked out tag v${{ matrix.nats_server_version }}."
+
+                      # Copy the overlay contents to the cloned repository
+                      cp -R "../$BUILD_FOLDER"/makefile ./
+                      echo "Overlay contents copied to cloned repository."
+
+                       cp -R "../$OVERLAY_FOLDER"/. ./
+                      # Run 'make compile' inside the cloned directory
+                      export GOOS=linux
+                      export GOARCH=${{ matrix.platform }}
+                      export VERSION=${{ steps.vtl.outputs.ver_semVerNoMeta }}
+                      export COMMIT_SHA=${{ github.sha }}   
+                      
+
+                      if make; then
+                          echo "'make compile_pipeline' executed successfully."
+
+                          # 'make compile_pipeline' produces a binary named 'nats-server' in the root of the cloned repo
+                          # Copy the binary to the /build folder
+                          if cp ./nats-server "../$BUILD_FOLDER"/; then
+                              ls -l "../$BUILD_FOLDER"/nats-server
+                              echo "nats-server binary copied to $BUILD_FOLDER."
+                          else
+                              echo "Failed to copy nats-server binary to $BUILD_FOLDER."
+                              exit 1
+                          fi
+                      else
+                          echo "Failed to execute 'make compile_pipeline'."
+                          exit 1
+                      fi
+                  else
+                      echo "Failed to checkout tag ${{ matrix.nats_server_version }}."
+                      exit 1
+                  fi                      
+              else
+                  echo "Failed to clone nats-server repository."
+                  exit 1
+              fi
+          else
+              echo "Nothing to overlay - skipping local nats-server binary build."
+          fi
+        env:
+          OVERLAY_FOLDER: ./overlay
+          CLONE_FOLDER: ./nats-server
+          BUILD_FOLDER: ./build
+
+      - name: Login to DOCKER
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+
+      - name: Build and push
+        id: docker_build
+        uses: docker/build-push-action@v6
+        env:
+          version: ${{ steps.vtl.outputs.ver_semVerNoMeta }}
+          date: ${{ steps.vtl.outputs.ver_created }}
+          commit: ${{ github.sha }}
+        with:
+          context: .
+          platforms: linux/${{ matrix.platform }}
+          file: ./build/Dockerfile
+          push: ${{ steps.vtl.outputs.docker_push }}
+          tags: ${{ steps.vtl.outputs.docker_tags }}
+          labels: ${{ steps.vtl.outputs.oci_labels }}
+          provenance: false
+          build-args: |
+            VERSION=version
+            DATE=date
+            COMMIT=commit
+            NATSSERVERVERSION=${{ matrix.nats_server_version }}
+
+  docker-merged-manifest:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # This grants write permission for repository contents, including tags
+    needs: [build-docker-push-image]
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Establish Versioning, Tags, and Labels
+        id: vtl
+        uses: mapped/action-vtl@latest
+        with:
+          baseVersion: ${{ env.BASE_VERSION }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          dockerImage: ${{ env.IMAGE_NAME }}
+
+      - name: Login to ACR
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+
+      # Note: The `extra-images` parameter needs to specify each of the matrix `image-suffix` values
+      #       from the `build-docker-push-image` job above.
+      - name: Create/push merged docker manifest
+        uses: Noelware/docker-manifest-action@0.4.3
+        with:
+          inputs: ${{ steps.vtl.outputs.docker_tags }}
+          images: ${{ steps.vtl.outputs.docker_dtag }}-amd64,${{ steps.vtl.outputs.docker_dtag }}-arm64
+          push: ${{ steps.vtl.outputs.docker_push }}
+          amend: false
