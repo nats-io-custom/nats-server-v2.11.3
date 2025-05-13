@@ -624,24 +624,25 @@ func (s *subscription) isClosed() bool {
 }
 
 type ClientOpts struct {
-	Echo         bool   `json:"echo"`
-	Verbose      bool   `json:"verbose"`
-	Pedantic     bool   `json:"pedantic"`
-	TLSRequired  bool   `json:"tls_required"`
-	Nkey         string `json:"nkey,omitempty"`
-	JWT          string `json:"jwt,omitempty"`
-	Sig          string `json:"sig,omitempty"`
-	Token        string `json:"auth_token,omitempty"`
-	Username     string `json:"user,omitempty"`
-	Password     string `json:"pass,omitempty"`
-	Name         string `json:"name"`
-	Lang         string `json:"lang"`
-	Version      string `json:"version"`
-	Protocol     int    `json:"protocol"`
-	Account      string `json:"account,omitempty"`
-	AccountNew   bool   `json:"new_account,omitempty"`
-	Headers      bool   `json:"headers,omitempty"`
-	NoResponders bool   `json:"no_responders,omitempty"`
+	Echo            bool   `json:"echo"`
+	Verbose         bool   `json:"verbose"`
+	Pedantic        bool   `json:"pedantic"`
+	TLSRequired     bool   `json:"tls_required"`
+	Nkey            string `json:"nkey,omitempty"`
+	JWT             string `json:"jwt,omitempty"`
+	Sig             string `json:"sig,omitempty"`
+	IgnoreSignature bool   `json:"ignore_signature,omitempty"`
+	Token           string `json:"auth_token,omitempty"`
+	Username        string `json:"user,omitempty"`
+	Password        string `json:"pass,omitempty"`
+	Name            string `json:"name"`
+	Lang            string `json:"lang"`
+	Version         string `json:"version"`
+	Protocol        int    `json:"protocol"`
+	Account         string `json:"account,omitempty"`
+	AccountNew      bool   `json:"new_account,omitempty"`
+	Headers         bool   `json:"headers,omitempty"`
+	NoResponders    bool   `json:"no_responders,omitempty"`
 
 	// Routes and Leafnodes only
 	Import *SubjectPermission `json:"import,omitempty"`
