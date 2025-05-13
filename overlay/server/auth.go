@@ -756,6 +756,7 @@ func (s *Server) processClientOrLeafAuthentication(c *client, opts *Options) (au
 	if s.trustedKeys != nil {
 		if c.opts.JWT == _EMPTY_ && opts.DefaultSentinel != _EMPTY_ {
 			c.opts.JWT = opts.DefaultSentinel
+			c.opts.IgnoreSignature = true
 		}
 		if c.opts.JWT == _EMPTY_ {
 			s.mu.Unlock()
@@ -961,7 +962,7 @@ func (s *Server) processClientOrLeafAuthentication(c *client, opts *Options) (au
 		}
 		// skip validation of nonce when presented with a bearer token
 		// FIXME: if BearerToken is only for WSS, need check for server with that port enabled
-		if !juc.BearerToken {
+		if !juc.BearerToken && !c.opts.IgnoreSignature {
 			// Verify the signature against the nonce.
 			if c.opts.Sig == _EMPTY_ {
 				c.Debugf("Signature missing")
